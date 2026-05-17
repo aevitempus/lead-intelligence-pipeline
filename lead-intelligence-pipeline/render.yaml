@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: lead-intelligence-api
+    runtime: docker
+    dockerfilePath: ./services/api/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: AI_MODEL
+        value: gpt-4.1-mini
+      - key: CRAWLER_API_TOKEN
+        sync: false
+
+  - type: worker
+    name: lead-intelligence-worker
+    runtime: docker
+    dockerfilePath: ./services/api/Dockerfile
+    dockerCommand: celery -A app.workers.celery_app worker --loglevel=info
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: AI_MODEL
+        value: gpt-4.1-mini
+      - key: CRAWLER_API_TOKEN
+        sync: false
