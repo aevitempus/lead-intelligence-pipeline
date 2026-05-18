@@ -1,5 +1,9 @@
+import csv
+import io
+
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db, Base, engine
@@ -161,6 +165,78 @@ def list_leads(
         query = query.filter(Lead.city == city)
 
     return query.order_by(Lead.created_at.desc()).limit(limit).all()
+
+
+@router.get("/leads/export")
+def export_leads_csv(
+    city: str | None = None,
+    limit: int = 1000,
+    db: Session = Depends(get_db),
+):
+    query = db.query(Lead)
+
+    if city:
+        query = query.filter(Lead.city == city)
+
+    leads = query.order_by(Lead.created_at.desc()).limit(limit).all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    writer.writerow(
+        [
+            "lead_id",
+            "business_name",
+            "category",
+            "country",
+            "city",
+            "address",
+            "rating",
+            "reviews_count",
+            "phone",
+            "website",
+            "maps_url",
+            "instagram",
+            "telegram",
+            "whatsapp",
+            "status",
+            "lead_score",
+            "created_at",
+        ]
+    )
+
+    for lead in leads:
+        writer.writerow(
+            [
+                lead.id,
+                lead.business_name,
+                lead.category,
+                lead.country,
+                lead.city,
+                lead.address,
+                lead.rating,
+                lead.reviews_count,
+                lead.phone,
+                lead.website,
+                lead.maps_url,
+                lead.instagram,
+                lead.telegram,
+                lead.whatsapp,
+                lead.status,
+                lead.lead_score,
+                lead.created_at,
+            ]
+        )
+
+    output.seek(0)
+
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename=leads_export.csv",
+        },
+    )
 
 
 @router.get("/leads/{lead_id}", response_model=LeadOut)
