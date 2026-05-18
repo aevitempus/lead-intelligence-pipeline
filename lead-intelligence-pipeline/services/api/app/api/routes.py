@@ -5,9 +5,22 @@ from app.db.session import get_db, Base, engine
 from app.models.entities import Campaign, Lead, AIAnalysisResult
 from app.schemas.dto import CampaignCreate, CampaignOut, LeadCreate, LeadOut
 from app.services.scoring import score_lead
-from app.services.ai_gateway import analyze_lead_payload
 
 router = APIRouter(prefix="/api/v1")
+
+
+def mock_analyze_lead_payload(payload: dict) -> dict:
+    return {
+        "company_summary": f"{payload.get('business_name')} is a potential ATM services lead in {payload.get('city')}.",
+        "priority": "high",
+        "recommended_action": "Contact via WhatsApp or phone and offer ATM maintenance services.",
+        "score": 87,
+        "signals": [
+            "Relevant business category",
+            "Has public contact information",
+            "Located in target city",
+        ],
+    }
 
 
 @router.post("/admin/init-db")
@@ -91,11 +104,11 @@ def analyze_lead(lead_id: str, db: Session = Depends(get_db)):
         "source_payload": lead.source_payload,
     }
 
-    result = analyze_lead_payload(payload)
+    result = mock_analyze_lead_payload(payload)
 
     row = AIAnalysisResult(
         lead_id=lead.id,
-        model="configured",
+        model="mock",
         result=result,
     )
 
@@ -166,11 +179,11 @@ def run_pipeline_sync(db: Session = Depends(get_db)):
         "source_payload": lead.source_payload,
     }
 
-    analysis = analyze_lead_payload(analysis_payload)
+    analysis = mock_analyze_lead_payload(analysis_payload)
 
     row = AIAnalysisResult(
         lead_id=lead.id,
-        model="configured",
+        model="mock",
         result=analysis,
     )
 
