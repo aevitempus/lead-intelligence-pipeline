@@ -85,6 +85,13 @@ def run_pipeline_endpoint(campaign_id: str):
         "campaign_id": campaign_id,
         "task_id": task.id,
     }
+
+    @router.post("/pipeline/run")
+def run_pipeline_sync():
+    return {
+        "status": "started",
+        "message": "Pipeline endpoint works. Next step: connect campaign creation, lead collection and analysis here."
+    }
     result = analyze_lead_payload(payload)
     row = AIAnalysisResult(lead_id=lead.id, model="configured", result=result)
     db.add(row)
