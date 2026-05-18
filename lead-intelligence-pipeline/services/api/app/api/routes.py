@@ -1,3 +1,4 @@
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -5,20 +6,28 @@ from app.db.session import get_db, Base, engine
 from app.models.entities import Campaign, Lead, AIAnalysisResult
 from app.schemas.dto import CampaignCreate, CampaignOut, LeadCreate, LeadOut
 from app.services.scoring import score_lead
+from app.services.lead_sources import search_google_maps_leads
 
 router = APIRouter(prefix="/api/v1")
 
 
+class PipelineRunRequest(BaseModel):
+    country: str = "Indonesia"
+    city: str = "Jakarta"
+    query: str = "ATM maintenance"
+    target_leads: int = 10
+
+
 def mock_analyze_lead_payload(payload: dict) -> dict:
     return {
-        "company_summary": f"{payload.get('business_name')} is a potential ATM services lead in {payload.get('city')}.",
+        "company_summary": f"{payload.get('business_name')} is a potential lead for {payload.get('category')} in {payload.get('city')}.",
         "priority": "high",
-        "recommended_action": "Contact via WhatsApp or phone and offer ATM maintenance services.",
+        "recommended_action": "Contact via phone, website, or WhatsApp and offer ATM maintenance services.",
         "score": 87,
         "signals": [
             "Relevant business category",
-            "Has public contact information",
             "Located in target city",
+            "Has public business information",
         ],
     }
 
@@ -122,18 +131,21 @@ def analyze_lead(lead_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/pipeline/run")
-def run_pipeline_sync(db: Session = Depends(get_db)):
+def run_pipeline_sync(
+    payload: PipelineRunRequest,
+    db: Session = Depends(get_db),
+):
     campaign_payload = {
-        "name": "ATM Vendors Indonesia",
-        "country": "Indonesia",
-        "city": "Jakarta",
-        "vertical": "ATM services",
+        "name": f"{payload.query} - {payload.city}, {payload.country}",
+        "country": payload.country,
+        "city": payload.city,
+        "vertical": payload.query,
         "keywords": [
-            "ATM maintenance",
-            "cash management",
-            "banking equipment",
+            payload.query,
+            payload.city,
+            payload.country,
         ],
-        "target_leads": 10,
+        "target_leads": payload.target_leads,
     }
 
     campaign = Campaign(**campaign_payload)
@@ -141,59 +153,78 @@ def run_pipeline_sync(db: Session = Depends(get_db)):
     db.commit()
     db.refresh(campaign)
 
-    lead_payload = {
-        "campaign_id": campaign.id,
-        "business_name": "PT ATM Service Indonesia",
-        "category": "ATM services",
-        "country": "Indonesia",
-        "city": "Jakarta",
-        "address": "Jakarta",
-        "rating": 4.5,
-        "reviews_count": 12,
-        "phone": "+62 21 123456",
-        "website": "https://example.com",
-        "maps_url": "https://maps.google.com",
-        "instagram": "",
-        "telegram": "",
-        "whatsapp": "",
-        "source_payload": {},
-    }
-
-    lead_payload["lead_score"] = score_lead(lead_payload)
-
-    lead = Lead(**lead_payload)
-    db.add(lead)
-    db.commit()
-    db.refresh(lead)
-
-    analysis_payload = {
-        "business_name": lead.business_name,
-        "category": lead.category,
-        "city": lead.city,
-        "rating": lead.rating,
-        "reviews_count": lead.reviews_count,
-        "website": lead.website,
-        "instagram": lead.instagram,
-        "telegram": lead.telegram,
-        "whatsapp": lead.whatsapp,
-        "source_payload": lead.source_payload,
-    }
-
-    analysis = mock_analyze_lead_payload(analysis_payload)
-
-    row = AIAnalysisResult(
-        lead_id=lead.id,
-        model="mock",
-        result=analysis,
+    source_leads = search_google_maps_leads(
+        query=payload.query,
+        country=payload.country,
+        city=payload.city,
     )
 
-    db.add(row)
-    db.commit()
+    created_leads = []
+
+    for source_lead in source_leads[: payload.target_leads]:
+        lead_payload = {
+            "campaign_id": campaign.id,
+            "business_name": source_lead.get("business_name") or "Unknown business",
+            "category": source_lead.get("category") or payload.query,
+            "country": source_lead.get("country") or payload.country,
+            "city": source_lead.get("city") or payload.city,
+            "address": source_lead.get("address") or "",
+            "rating": source_lead.get("rating") or 0.0,
+            "reviews_count": source_lead.get("reviews_count") or 0,
+            "phone": source_lead.get("phone") or "",
+            "website": source_lead.get("website") or "",
+            "maps_url": source_lead.get("maps_url") or "",
+            "instagram": source_lead.get("instagram") or "",
+            "telegram": source_lead.get("telegram") or "",
+            "whatsapp": source_lead.get("whatsapp") or "",
+            "source_payload": source_lead.get("source_payload") or {},
+        }
+
+        lead_payload["lead_score"] = score_lead(lead_payload)
+
+        lead = Lead(**lead_payload)
+        db.add(lead)
+        db.commit()
+        db.refresh(lead)
+
+        analysis_payload = {
+            "business_name": lead.business_name,
+            "category": lead.category,
+            "city": lead.city,
+            "rating": lead.rating,
+            "reviews_count": lead.reviews_count,
+            "website": lead.website,
+            "instagram": lead.instagram,
+            "telegram": lead.telegram,
+            "whatsapp": lead.whatsapp,
+            "source_payload": lead.source_payload,
+        }
+
+        analysis = mock_analyze_lead_payload(analysis_payload)
+
+        row = AIAnalysisResult(
+            lead_id=lead.id,
+            model="mock",
+            result=analysis,
+        )
+
+        db.add(row)
+        db.commit()
+
+        created_leads.append(
+            {
+                "lead_id": lead.id,
+                "business_name": lead.business_name,
+                "lead_score": lead.lead_score,
+                "analysis": analysis,
+            }
+        )
 
     return {
         "status": "completed",
-        "campaign_id": lead.campaign_id,
-        "lead_id": lead.id,
-        "lead_score": lead.lead_score,
-        "analysis": analysis,
+        "campaign_id": campaign.id,
+        "campaign_name": campaign.name,
+        "requested_target_leads": payload.target_leads,
+        "created_leads_count": len(created_leads),
+        "leads": created_leads,
     }
