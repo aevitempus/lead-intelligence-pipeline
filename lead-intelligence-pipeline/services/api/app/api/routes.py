@@ -13,7 +13,7 @@ from app.services.scoring import score_lead
 from app.services.lead_sources import search_google_maps_leads
 from app.services.digital_signals import detect_digital_signals
 from app.services.website_enrichment import enrich_website
-from app.services.outreach_generator import generate_outreach
+from app.services.ai_outreach import generate_ai_outreach
 
 router = APIRouter(prefix="/api/v1")
 
@@ -281,7 +281,7 @@ def analyze_lead(lead_id: str, db: Session = Depends(get_db)):
 
     result = mock_analyze_lead_payload(lead_data)
 
-    outreach = generate_outreach(
+    outreach = generate_ai_outreach(
         {
             **lead_data,
             "digital_signals": digital_signals,
@@ -291,7 +291,7 @@ def analyze_lead(lead_id: str, db: Session = Depends(get_db)):
 
     row = AIAnalysisResult(
         lead_id=lead.id,
-        model="mock-smb",
+        model="gpt-4o-mini",
         result={
             "analysis": result,
             "digital_signals": digital_signals,
@@ -400,7 +400,7 @@ def run_pipeline_sync(
             analysis_payload,
         )
 
-        outreach = generate_outreach(
+        outreach = generate_ai_outreach(
             {
                 **analysis_payload,
                 "digital_signals": digital_signals,
@@ -410,7 +410,7 @@ def run_pipeline_sync(
 
         row = AIAnalysisResult(
             lead_id=lead.id,
-            model="mock-smb",
+            model="gpt-4o-mini",
             result={
                 "analysis": analysis,
                 "digital_signals": digital_signals,
