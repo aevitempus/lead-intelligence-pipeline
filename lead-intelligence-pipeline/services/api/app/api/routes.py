@@ -8,6 +8,7 @@ from app.schemas.dto import CampaignCreate, CampaignOut, LeadCreate, LeadOut
 from app.services.scoring import score_lead
 from app.services.lead_sources import search_google_maps_leads
 from app.services.digital_signals import detect_digital_signals
+from app.services.website_enrichment import enrich_website
 
 router = APIRouter(prefix="/api/v1")
 
@@ -29,7 +30,9 @@ def mock_analyze_lead_payload(payload: dict) -> dict:
     phone = payload.get("phone") or ""
     instagram = payload.get("instagram") or ""
     whatsapp = payload.get("whatsapp") or ""
+
     digital_signals = payload.get("digital_signals") or {}
+    website_enrichment = payload.get("website_enrichment") or {}
 
     score = 40
 
@@ -58,6 +61,9 @@ def mock_analyze_lead_payload(payload: dict) -> dict:
     if digital_signals.get("has_booking_stack"):
         score -= 10
 
+    if website_enrichment.get("has_online_booking"):
+        score -= 10
+
     if digital_signals.get("opportunity") in [
         "instagram_first_business",
         "no_website_phone_only",
@@ -74,7 +80,11 @@ def mock_analyze_lead_payload(payload: dict) -> dict:
     else:
         priority = "low"
 
-    opportunity = digital_signals.get("opportunity", "needs_enrichment")
+    opportunity = digital_signals.get(
+        "opportunity",
+        "needs_enrichment",
+    )
+
     opportunity_reason = digital_signals.get(
         "opportunity_reason",
         "Needs deeper enrichment.",
@@ -87,8 +97,8 @@ def mock_analyze_lead_payload(payload: dict) -> dict:
         ),
         "priority": priority,
         "recommended_action": (
-            "Offer booking automation, WhatsApp lead capture, customer reminders, "
-            "and repeat-visit campaigns."
+            "Offer booking automation, WhatsApp lead capture, "
+            "customer reminders, and repeat-visit campaigns."
         ),
         "score": score,
         "opportunity": opportunity,
@@ -184,7 +194,13 @@ def analyze_lead(lead_id: str, db: Session = Depends(get_db)):
     }
 
     digital_signals = detect_digital_signals(lead_data)
+
+    website_enrichment = enrich_website(
+        lead.website,
+    )
+
     lead_data["digital_signals"] = digital_signals
+    lead_data["website_enrichment"] = website_enrichment
 
     result = mock_analyze_lead_payload(lead_data)
 
@@ -200,6 +216,7 @@ def analyze_lead(lead_id: str, db: Session = Depends(get_db)):
     return {
         "lead_id": lead.id,
         "digital_signals": digital_signals,
+        "website_enrichment": website_enrichment,
         "analysis": result,
     }
 
@@ -254,7 +271,9 @@ def run_pipeline_sync(
             "source_payload": source_lead.get("source_payload") or {},
         }
 
-        lead_payload["lead_score"] = score_lead(lead_payload)
+        lead_payload["lead_score"] = score_lead(
+            lead_payload,
+        )
 
         lead = Lead(**lead_payload)
         db.add(lead)
@@ -275,10 +294,20 @@ def run_pipeline_sync(
             "source_payload": lead.source_payload,
         }
 
-        digital_signals = detect_digital_signals(analysis_payload)
-        analysis_payload["digital_signals"] = digital_signals
+        digital_signals = detect_digital_signals(
+            analysis_payload,
+        )
 
-        analysis = mock_analyze_lead_payload(analysis_payload)
+        website_enrichment = enrich_website(
+            lead.website,
+        )
+
+        analysis_payload["digital_signals"] = digital_signals
+        analysis_payload["website_enrichment"] = website_enrichment
+
+        analysis = mock_analyze_lead_payload(
+            analysis_payload,
+        )
 
         row = AIAnalysisResult(
             lead_id=lead.id,
@@ -304,6 +333,7 @@ def run_pipeline_sync(
                 "whatsapp": lead.whatsapp,
                 "lead_score": lead.lead_score,
                 "digital_signals": digital_signals,
+                "website_enrichment": website_enrichment,
                 "analysis": analysis,
             }
         )
