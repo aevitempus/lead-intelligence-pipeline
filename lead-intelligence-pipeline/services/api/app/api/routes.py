@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+
 from app.db.session import get_db, Base, engine
 from app.models.entities import Campaign, Lead, AIAnalysisResult
 from app.schemas.dto import CampaignCreate, CampaignOut, LeadCreate, LeadOut
 from app.services.scoring import score_lead
 from app.services.ai_gateway import analyze_lead_payload
-from app.worker import run_pipeline
 
 router = APIRouter(prefix="/api/v1")
 
@@ -34,36 +34,50 @@ def list_campaigns(db: Session = Depends(get_db)):
 def create_lead(payload: LeadCreate, db: Session = Depends(get_db)):
     data = payload.model_dump()
     data["lead_score"] = score_lead(data)
+
     lead = Lead(**data)
     db.add(lead)
     db.commit()
     db.refresh(lead)
+
     return lead
 
 
 @router.get("/leads", response_model=list[LeadOut])
-def list_leads(status: str | None = None, city: str | None = None, limit: int = 100, db: Session = Depends(get_db)):
+def list_leads(
+    status: str | None = None,
+    city: str | None = None,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+):
     query = db.query(Lead)
+
     if status:
         query = query.filter(Lead.status == status)
+
     if city:
         query = query.filter(Lead.city == city)
+
     return query.order_by(Lead.created_at.desc()).limit(limit).all()
 
 
 @router.get("/leads/{lead_id}", response_model=LeadOut)
 def get_lead(lead_id: str, db: Session = Depends(get_db)):
     lead = db.get(Lead, lead_id)
+
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
+
     return lead
 
 
 @router.post("/leads/{lead_id}/analyze")
 def analyze_lead(lead_id: str, db: Session = Depends(get_db)):
     lead = db.get(Lead, lead_id)
+
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
+
     payload = {
         "business_name": lead.business_name,
         "category": lead.category,
@@ -76,24 +90,27 @@ def analyze_lead(lead_id: str, db: Session = Depends(get_db)):
         "whatsapp": lead.whatsapp,
         "source_payload": lead.source_payload,
     }
-@router.post("/pipeline/run/{campaign_id}")
-def run_pipeline_endpoint(campaign_id: str):
-    task = run_pipeline.delay(campaign_id)
+
+    result = analyze_lead_payload(payload)
+
+    row = AIAnalysisResult(
+        lead_id=lead.id,
+        model="configured",
+        result=result,
+    )
+
+    db.add(row)
+    db.commit()
 
     return {
-        "status": "queued",
-        "campaign_id": campaign_id,
-        "task_id": task.id,
+        "lead_id": lead.id,
+        "analysis": result,
     }
 
-    @router.post("/pipeline/run")
+
+@router.post("/pipeline/run")
 def run_pipeline_sync():
     return {
         "status": "started",
-        "message": "Pipeline endpoint works. Next step: connect campaign creation, lead collection and analysis here."
+        "message": "Pipeline endpoint works. Next step: connect campaign creation, lead collection and analysis here.",
     }
-    result = analyze_lead_payload(payload)
-    row = AIAnalysisResult(lead_id=lead.id, model="configured", result=result)
-    db.add(row)
-    db.commit()
-    return {"lead_id": lead.id, "analysis": result}
