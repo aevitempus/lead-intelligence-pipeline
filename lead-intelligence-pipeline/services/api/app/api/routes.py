@@ -109,8 +109,78 @@ def analyze_lead(lead_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/pipeline/run")
-def run_pipeline_sync():
+def run_pipeline_sync(db: Session = Depends(get_db)):
+    campaign_payload = {
+        "name": "ATM Vendors Indonesia",
+        "country": "Indonesia",
+        "city": "Jakarta",
+        "vertical": "ATM services",
+        "keywords": [
+            "ATM maintenance",
+            "cash management",
+            "banking equipment",
+        ],
+        "target_leads": 10,
+    }
+
+    campaign = Campaign(**campaign_payload)
+    db.add(campaign)
+    db.commit()
+    db.refresh(campaign)
+
+    lead_payload = {
+        "campaign_id": campaign.id,
+        "business_name": "PT ATM Service Indonesia",
+        "category": "ATM services",
+        "country": "Indonesia",
+        "city": "Jakarta",
+        "address": "Jakarta",
+        "rating": 4.5,
+        "reviews_count": 12,
+        "phone": "+62 21 123456",
+        "website": "https://example.com",
+        "maps_url": "https://maps.google.com",
+        "instagram": "",
+        "telegram": "",
+        "whatsapp": "",
+        "source_payload": {},
+    }
+
+    lead_payload["lead_score"] = score_lead(lead_payload)
+
+    lead = Lead(**lead_payload)
+    db.add(lead)
+    db.commit()
+    db.refresh(lead)
+
+    analysis_payload = {
+        "business_name": lead.business_name,
+        "category": lead.category,
+        "city": lead.city,
+        "rating": lead.rating,
+        "reviews_count": lead.reviews_count,
+        "website": lead.website,
+        "instagram": lead.instagram,
+        "telegram": lead.telegram,
+        "whatsapp": lead.whatsapp,
+        "source_payload": lead.source_payload,
+    }
+
+    analysis = analyze_lead_payload(analysis_payload)
+
+    row = AIAnalysisResult(
+        lead_id=lead.id,
+        model="configured",
+        result=analysis,
+    )
+
+    db.add(row)
+    db.commit()
+
     return {
-        "status": "started",
-        "message": "Pipeline endpoint works. Next step: connect campaign creation, lead collection and analysis here.",
+        "status": "completed",
+        "campaign_id": lead.campaign_id,
+        "lead_id": lead.id,
+        "lead_score": lead.lead_score,
+        "analysis": analysis,
     }
