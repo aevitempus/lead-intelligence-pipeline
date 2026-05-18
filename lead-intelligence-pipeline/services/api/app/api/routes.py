@@ -14,20 +14,69 @@ router = APIRouter(prefix="/api/v1")
 class PipelineRunRequest(BaseModel):
     country: str = "Indonesia"
     city: str = "Jakarta"
-    query: str = "ATM maintenance"
+    query: str = "barbershop online booking"
     target_leads: int = 10
 
 
 def mock_analyze_lead_payload(payload: dict) -> dict:
+    business_name = payload.get("business_name", "")
+    category = payload.get("category", "")
+    city = payload.get("city", "")
+    rating = payload.get("rating") or 0
+    reviews = payload.get("reviews_count") or 0
+    website = payload.get("website") or ""
+    phone = payload.get("phone") or ""
+    instagram = payload.get("instagram") or ""
+    whatsapp = payload.get("whatsapp") or ""
+
+    score = 40
+
+    if rating >= 4.5:
+        score += 20
+    elif rating >= 4.0:
+        score += 10
+
+    if reviews >= 100:
+        score += 20
+    elif reviews >= 30:
+        score += 10
+
+    if website:
+        score += 10
+
+    if phone:
+        score += 5
+
+    if instagram:
+        score += 5
+
+    if whatsapp:
+        score += 5
+
+    score = min(score, 100)
+
+    if score >= 80:
+        priority = "high"
+    elif score >= 60:
+        priority = "medium"
+    else:
+        priority = "low"
+
     return {
-        "company_summary": f"{payload.get('business_name')} is a potential lead for {payload.get('category')} in {payload.get('city')}.",
-        "priority": "high",
-        "recommended_action": "Contact via phone, website, or WhatsApp and offer ATM maintenance services.",
-        "score": 87,
+        "company_summary": (
+            f"{business_name} is a {category} SMB in {city}. "
+            f"It has a rating of {rating} with {reviews} reviews."
+        ),
+        "priority": priority,
+        "recommended_action": (
+            "Offer booking automation, WhatsApp lead capture, customer reminders, "
+            "and repeat-visit campaigns."
+        ),
+        "score": score,
         "signals": [
-            "Relevant business category",
-            "Located in target city",
-            "Has public business information",
+            "SMB business",
+            "Potential need for online booking or customer retention automation",
+            "Public business profile found",
         ],
     }
 
@@ -107,6 +156,7 @@ def analyze_lead(lead_id: str, db: Session = Depends(get_db)):
         "rating": lead.rating,
         "reviews_count": lead.reviews_count,
         "website": lead.website,
+        "phone": lead.phone,
         "instagram": lead.instagram,
         "telegram": lead.telegram,
         "whatsapp": lead.whatsapp,
@@ -117,7 +167,7 @@ def analyze_lead(lead_id: str, db: Session = Depends(get_db)):
 
     row = AIAnalysisResult(
         lead_id=lead.id,
-        model="mock",
+        model="mock-smb",
         result=result,
     )
 
@@ -194,6 +244,7 @@ def run_pipeline_sync(
             "rating": lead.rating,
             "reviews_count": lead.reviews_count,
             "website": lead.website,
+            "phone": lead.phone,
             "instagram": lead.instagram,
             "telegram": lead.telegram,
             "whatsapp": lead.whatsapp,
@@ -204,7 +255,7 @@ def run_pipeline_sync(
 
         row = AIAnalysisResult(
             lead_id=lead.id,
-            model="mock",
+            model="mock-smb",
             result=analysis,
         )
 
@@ -215,6 +266,7 @@ def run_pipeline_sync(
             {
                 "lead_id": lead.id,
                 "business_name": lead.business_name,
+                "category": lead.category,
                 "lead_score": lead.lead_score,
                 "analysis": analysis,
             }
