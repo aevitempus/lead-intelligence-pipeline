@@ -7,6 +7,7 @@ from app.models.entities import Campaign, Lead, AIAnalysisResult
 from app.schemas.dto import CampaignCreate, CampaignOut, LeadCreate, LeadOut
 from app.services.scoring import score_lead
 from app.services.lead_sources import search_google_maps_leads
+from app.services.digital_signals import detect_digital_signals
 
 router = APIRouter(prefix="/api/v1")
 
@@ -28,6 +29,7 @@ def mock_analyze_lead_payload(payload: dict) -> dict:
     phone = payload.get("phone") or ""
     instagram = payload.get("instagram") or ""
     whatsapp = payload.get("whatsapp") or ""
+    digital_signals = payload.get("digital_signals") or {}
 
     score = 40
 
@@ -53,7 +55,17 @@ def mock_analyze_lead_payload(payload: dict) -> dict:
     if whatsapp:
         score += 5
 
-    score = min(score, 100)
+    if digital_signals.get("has_booking_stack"):
+        score -= 10
+
+    if digital_signals.get("opportunity") in [
+        "instagram_first_business",
+        "no_website_phone_only",
+        "website_without_booking",
+    ]:
+        score += 10
+
+    score = max(0, min(score, 100))
 
     if score >= 80:
         priority = "high"
@@ -61,6 +73,12 @@ def mock_analyze_lead_payload(payload: dict) -> dict:
         priority = "medium"
     else:
         priority = "low"
+
+    opportunity = digital_signals.get("opportunity", "needs_enrichment")
+    opportunity_reason = digital_signals.get(
+        "opportunity_reason",
+        "Needs deeper enrichment.",
+    )
 
     return {
         "company_summary": (
@@ -73,6 +91,8 @@ def mock_analyze_lead_payload(payload: dict) -> dict:
             "and repeat-visit campaigns."
         ),
         "score": score,
+        "opportunity": opportunity,
+        "opportunity_reason": opportunity_reason,
         "signals": [
             "SMB business",
             "Potential need for online booking or customer retention automation",
@@ -149,7 +169,7 @@ def analyze_lead(lead_id: str, db: Session = Depends(get_db)):
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    payload = {
+    lead_data = {
         "business_name": lead.business_name,
         "category": lead.category,
         "city": lead.city,
@@ -163,7 +183,10 @@ def analyze_lead(lead_id: str, db: Session = Depends(get_db)):
         "source_payload": lead.source_payload,
     }
 
-    result = mock_analyze_lead_payload(payload)
+    digital_signals = detect_digital_signals(lead_data)
+    lead_data["digital_signals"] = digital_signals
+
+    result = mock_analyze_lead_payload(lead_data)
 
     row = AIAnalysisResult(
         lead_id=lead.id,
@@ -176,6 +199,7 @@ def analyze_lead(lead_id: str, db: Session = Depends(get_db)):
 
     return {
         "lead_id": lead.id,
+        "digital_signals": digital_signals,
         "analysis": result,
     }
 
@@ -251,6 +275,9 @@ def run_pipeline_sync(
             "source_payload": lead.source_payload,
         }
 
+        digital_signals = detect_digital_signals(analysis_payload)
+        analysis_payload["digital_signals"] = digital_signals
+
         analysis = mock_analyze_lead_payload(analysis_payload)
 
         row = AIAnalysisResult(
@@ -276,6 +303,7 @@ def run_pipeline_sync(
                 "instagram": lead.instagram,
                 "whatsapp": lead.whatsapp,
                 "lead_score": lead.lead_score,
+                "digital_signals": digital_signals,
                 "analysis": analysis,
             }
         )
