@@ -9,6 +9,7 @@ from app.services.scoring import score_lead
 from app.services.lead_sources import search_google_maps_leads
 from app.services.digital_signals import detect_digital_signals
 from app.services.website_enrichment import enrich_website
+from app.services.outreach_generator import generate_outreach
 
 router = APIRouter(prefix="/api/v1")
 
@@ -204,10 +205,23 @@ def analyze_lead(lead_id: str, db: Session = Depends(get_db)):
 
     result = mock_analyze_lead_payload(lead_data)
 
+    outreach = generate_outreach(
+        {
+            **lead_data,
+            "digital_signals": digital_signals,
+            "website_enrichment": website_enrichment,
+        }
+    )
+
     row = AIAnalysisResult(
         lead_id=lead.id,
         model="mock-smb",
-        result=result,
+        result={
+            "analysis": result,
+            "digital_signals": digital_signals,
+            "website_enrichment": website_enrichment,
+            "outreach": outreach,
+        },
     )
 
     db.add(row)
@@ -218,6 +232,7 @@ def analyze_lead(lead_id: str, db: Session = Depends(get_db)):
         "digital_signals": digital_signals,
         "website_enrichment": website_enrichment,
         "analysis": result,
+        "outreach": outreach,
     }
 
 
@@ -309,10 +324,23 @@ def run_pipeline_sync(
             analysis_payload,
         )
 
+        outreach = generate_outreach(
+            {
+                **analysis_payload,
+                "digital_signals": digital_signals,
+                "website_enrichment": website_enrichment,
+            }
+        )
+
         row = AIAnalysisResult(
             lead_id=lead.id,
             model="mock-smb",
-            result=analysis,
+            result={
+                "analysis": analysis,
+                "digital_signals": digital_signals,
+                "website_enrichment": website_enrichment,
+                "outreach": outreach,
+            },
         )
 
         db.add(row)
@@ -335,6 +363,7 @@ def run_pipeline_sync(
                 "digital_signals": digital_signals,
                 "website_enrichment": website_enrichment,
                 "analysis": analysis,
+                "outreach": outreach,
             }
         )
 
