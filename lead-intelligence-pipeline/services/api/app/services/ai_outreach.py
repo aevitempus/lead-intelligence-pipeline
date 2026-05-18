@@ -1,4 +1,6 @@
+import json
 import os
+
 from openai import OpenAI
 
 client = OpenAI(
@@ -17,11 +19,7 @@ def generate_ai_outreach(lead: dict) -> dict:
     prompt = f"""
 You are an elite SMB outbound sales strategist.
 
-Generate:
-1. sales_angle
-2. offer
-3. cold_email
-4. whatsapp_message
+Generate personalized outreach for this SMB.
 
 Business:
 - Name: {business_name}
@@ -29,10 +27,10 @@ Business:
 - City: {city}
 
 Digital signals:
-{digital_signals}
+{json.dumps(digital_signals, ensure_ascii=False)}
 
 Website enrichment:
-{website_enrichment}
+{json.dumps(website_enrichment, ensure_ascii=False)}
 
 Focus on:
 - booking automation
@@ -42,18 +40,28 @@ Focus on:
 - customer communication
 - lead conversion
 
-Keep tone professional and concise.
+Return ONLY valid JSON with this exact schema:
+{{
+  "sales_angle": "string",
+  "offer": "string",
+  "cold_email_subject": "string",
+  "cold_email": "string",
+  "whatsapp_message": "string"
+}}
+
+No markdown. No explanations.
 """
 
     response = client.chat.completions.create(
         model="gpt-4o-mini",
-        temperature=0.7,
+        temperature=0.5,
+        response_format={
+            "type": "json_object",
+        },
         messages=[
             {
                 "role": "system",
-                "content": (
-                    "You generate highly personalized SMB outbound messaging."
-                ),
+                "content": "You generate concise, personalized SMB outbound messaging as valid JSON.",
             },
             {
                 "role": "user",
@@ -64,6 +72,13 @@ Keep tone professional and concise.
 
     content = response.choices[0].message.content
 
-    return {
-        "generated_text": content,
-    }
+    try:
+        return json.loads(content)
+    except Exception:
+        return {
+            "sales_angle": "",
+            "offer": "",
+            "cold_email_subject": "",
+            "cold_email": content,
+            "whatsapp_message": "",
+        }
