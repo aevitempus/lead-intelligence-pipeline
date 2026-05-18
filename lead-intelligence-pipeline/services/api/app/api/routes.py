@@ -5,6 +5,7 @@ from app.models.entities import Campaign, Lead, AIAnalysisResult
 from app.schemas.dto import CampaignCreate, CampaignOut, LeadCreate, LeadOut
 from app.services.scoring import score_lead
 from app.services.ai_gateway import analyze_lead_payload
+from app.worker import run_pipeline
 
 router = APIRouter(prefix="/api/v1")
 
@@ -74,6 +75,15 @@ def analyze_lead(lead_id: str, db: Session = Depends(get_db)):
         "telegram": lead.telegram,
         "whatsapp": lead.whatsapp,
         "source_payload": lead.source_payload,
+    }
+@router.post("/pipeline/run/{campaign_id}")
+def run_pipeline_endpoint(campaign_id: str):
+    task = run_pipeline.delay(campaign_id)
+
+    return {
+        "status": "queued",
+        "campaign_id": campaign_id,
+        "task_id": task.id,
     }
     result = analyze_lead_payload(payload)
     row = AIAnalysisResult(lead_id=lead.id, model="configured", result=result)
