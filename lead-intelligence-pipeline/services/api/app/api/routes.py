@@ -55,6 +55,107 @@ def migrate_lead_intelligence(db: Session = Depends(get_db)):
     }
 
 
+@router.post("/admin/backfill-intelligence")
+def backfill_intelligence(
+    limit: int = 100,
+    only_missing: bool = True,
+    db: Session = Depends(get_db),
+):
+    query = db.query(Lead)
+
+    if only_missing:
+        query = query.filter(Lead.icp_segment.is_(None))
+
+    leads = query.order_by(Lead.created_at.desc()).limit(limit).all()
+
+    updated_count = 0
+    failed_count = 0
+    results = []
+
+    for lead in leads:
+        try:
+            lead_data = {
+                "business_name": lead.business_name,
+                "category": lead.category,
+                "country": lead.country,
+                "city": lead.city,
+                "rating": lead.rating,
+                "reviews_count": lead.reviews_count,
+                "website": lead.website,
+                "phone": lead.phone,
+                "instagram": lead.instagram,
+                "telegram": lead.telegram,
+                "whatsapp": lead.whatsapp,
+                "source_payload": lead.source_payload,
+            }
+
+            digital_signals = detect_digital_signals(lead_data)
+            website_enrichment = enrich_website(lead.website)
+
+            intelligence_payload = {
+                **lead_data,
+                "digital_signals": digital_signals,
+                "website_enrichment": website_enrichment,
+            }
+
+            analysis = enrich_lead_intelligence(intelligence_payload)
+
+            lead.lead_score = analysis.get("lead_score") or analysis.get("score") or lead.lead_score
+            lead.lead_priority = analysis.get("lead_priority")
+            lead.digital_maturity = analysis.get("digital_maturity")
+            lead.icp_segment = analysis.get("icp_segment")
+            lead.main_pain_point = analysis.get("main_pain_point")
+            lead.recommended_offer = analysis.get("recommended_offer")
+            lead.outreach_angle = analysis.get("outreach_angle")
+
+            row = AIAnalysisResult(
+                lead_id=lead.id,
+                model="backfill-intelligence",
+                result={
+                    "analysis": analysis,
+                    "digital_signals": digital_signals,
+                    "website_enrichment": website_enrichment,
+                },
+            )
+
+            db.add(row)
+
+            updated_count += 1
+
+            results.append(
+                {
+                    "lead_id": lead.id,
+                    "business_name": lead.business_name,
+                    "lead_score": lead.lead_score,
+                    "lead_priority": lead.lead_priority,
+                    "digital_maturity": lead.digital_maturity,
+                    "icp_segment": lead.icp_segment,
+                }
+            )
+
+        except Exception as exc:
+            failed_count += 1
+
+            results.append(
+                {
+                    "lead_id": lead.id,
+                    "business_name": lead.business_name,
+                    "error": str(exc),
+                }
+            )
+
+    db.commit()
+
+    return {
+        "status": "completed",
+        "requested_limit": limit,
+        "only_missing": only_missing,
+        "updated_count": updated_count,
+        "failed_count": failed_count,
+        "results": results,
+    }
+
+
 @router.post("/campaigns", response_model=CampaignOut)
 def create_campaign(payload: CampaignCreate, db: Session = Depends(get_db)):
     campaign = Campaign(**payload.model_dump())
@@ -369,6 +470,7 @@ def run_pipeline_sync(
         lead_payload["lead_score"] = analysis.get("lead_score") or score_lead(
             lead_payload,
         )
+
         lead_payload["lead_priority"] = analysis.get("lead_priority")
         lead_payload["digital_maturity"] = analysis.get("digital_maturity")
         lead_payload["icp_segment"] = analysis.get("icp_segment")
@@ -377,6 +479,7 @@ def run_pipeline_sync(
         lead_payload["outreach_angle"] = analysis.get("outreach_angle")
 
         lead = Lead(**lead_payload)
+
         db.add(lead)
         db.commit()
         db.refresh(lead)
