@@ -14,6 +14,7 @@ from app.services.lead_sources import search_google_maps_leads
 from app.services.digital_signals import detect_digital_signals
 from app.services.website_enrichment import enrich_website
 from app.services.ai_outreach import generate_ai_outreach
+from app.services.lead_intelligence import enrich_lead_intelligence
 
 router = APIRouter(prefix="/api/v1")
 
@@ -23,97 +24,6 @@ class PipelineRunRequest(BaseModel):
     city: str = "Jakarta"
     query: str = "barbershop online booking"
     target_leads: int = 10
-
-
-def mock_analyze_lead_payload(payload: dict) -> dict:
-    business_name = payload.get("business_name", "")
-    category = payload.get("category", "")
-    city = payload.get("city", "")
-    rating = payload.get("rating") or 0
-    reviews = payload.get("reviews_count") or 0
-    website = payload.get("website") or ""
-    phone = payload.get("phone") or ""
-    instagram = payload.get("instagram") or ""
-    whatsapp = payload.get("whatsapp") or ""
-
-    digital_signals = payload.get("digital_signals") or {}
-    website_enrichment = payload.get("website_enrichment") or {}
-
-    score = 40
-
-    if rating >= 4.5:
-        score += 20
-    elif rating >= 4.0:
-        score += 10
-
-    if reviews >= 100:
-        score += 20
-    elif reviews >= 30:
-        score += 10
-
-    if website:
-        score += 10
-
-    if phone:
-        score += 5
-
-    if instagram:
-        score += 5
-
-    if whatsapp:
-        score += 5
-
-    if digital_signals.get("has_booking_stack"):
-        score -= 10
-
-    if website_enrichment.get("has_online_booking"):
-        score -= 10
-
-    if digital_signals.get("opportunity") in [
-        "instagram_first_business",
-        "no_website_phone_only",
-        "website_without_booking",
-    ]:
-        score += 10
-
-    score = max(0, min(score, 100))
-
-    if score >= 80:
-        priority = "high"
-    elif score >= 60:
-        priority = "medium"
-    else:
-        priority = "low"
-
-    opportunity = digital_signals.get(
-        "opportunity",
-        "needs_enrichment",
-    )
-
-    opportunity_reason = digital_signals.get(
-        "opportunity_reason",
-        "Needs deeper enrichment.",
-    )
-
-    return {
-        "company_summary": (
-            f"{business_name} is a {category} SMB in {city}. "
-            f"It has a rating of {rating} with {reviews} reviews."
-        ),
-        "priority": priority,
-        "recommended_action": (
-            "Offer booking automation, WhatsApp lead capture, "
-            "customer reminders, and repeat-visit campaigns."
-        ),
-        "score": score,
-        "opportunity": opportunity,
-        "opportunity_reason": opportunity_reason,
-        "signals": [
-            "SMB business",
-            "Potential need for online booking or customer retention automation",
-            "Public business profile found",
-        ],
-    }
 
 
 @router.post("/admin/init-db")
@@ -259,6 +169,7 @@ def analyze_lead(lead_id: str, db: Session = Depends(get_db)):
     lead_data = {
         "business_name": lead.business_name,
         "category": lead.category,
+        "country": lead.country,
         "city": lead.city,
         "rating": lead.rating,
         "reviews_count": lead.reviews_count,
@@ -271,21 +182,20 @@ def analyze_lead(lead_id: str, db: Session = Depends(get_db)):
     }
 
     digital_signals = detect_digital_signals(lead_data)
+    website_enrichment = enrich_website(lead.website)
 
-    website_enrichment = enrich_website(
-        lead.website,
-    )
+    intelligence_payload = {
+        **lead_data,
+        "digital_signals": digital_signals,
+        "website_enrichment": website_enrichment,
+    }
 
-    lead_data["digital_signals"] = digital_signals
-    lead_data["website_enrichment"] = website_enrichment
-
-    result = mock_analyze_lead_payload(lead_data)
+    analysis = enrich_lead_intelligence(intelligence_payload)
 
     outreach = generate_ai_outreach(
         {
-            **lead_data,
-            "digital_signals": digital_signals,
-            "website_enrichment": website_enrichment,
+            **intelligence_payload,
+            **analysis,
         }
     )
 
@@ -293,21 +203,24 @@ def analyze_lead(lead_id: str, db: Session = Depends(get_db)):
         lead_id=lead.id,
         model="gpt-4o-mini",
         result={
-            "analysis": result,
+            "analysis": analysis,
             "digital_signals": digital_signals,
             "website_enrichment": website_enrichment,
             "outreach": outreach,
         },
     )
 
+    lead.lead_score = analysis.get("lead_score") or analysis.get("score") or lead.lead_score
+
     db.add(row)
     db.commit()
+    db.refresh(lead)
 
     return {
         "lead_id": lead.id,
         "digital_signals": digital_signals,
         "website_enrichment": website_enrichment,
-        "analysis": result,
+        "analysis": analysis,
         "outreach": outreach,
     }
 
@@ -362,7 +275,33 @@ def run_pipeline_sync(
             "source_payload": source_lead.get("source_payload") or {},
         }
 
-        lead_payload["lead_score"] = score_lead(
+        analysis_payload = {
+            "business_name": lead_payload["business_name"],
+            "category": lead_payload["category"],
+            "country": lead_payload["country"],
+            "city": lead_payload["city"],
+            "rating": lead_payload["rating"],
+            "reviews_count": lead_payload["reviews_count"],
+            "website": lead_payload["website"],
+            "phone": lead_payload["phone"],
+            "instagram": lead_payload["instagram"],
+            "telegram": lead_payload["telegram"],
+            "whatsapp": lead_payload["whatsapp"],
+            "source_payload": lead_payload["source_payload"],
+        }
+
+        digital_signals = detect_digital_signals(analysis_payload)
+        website_enrichment = enrich_website(lead_payload["website"])
+
+        intelligence_payload = {
+            **analysis_payload,
+            "digital_signals": digital_signals,
+            "website_enrichment": website_enrichment,
+        }
+
+        analysis = enrich_lead_intelligence(intelligence_payload)
+
+        lead_payload["lead_score"] = analysis.get("lead_score") or score_lead(
             lead_payload,
         )
 
@@ -371,40 +310,10 @@ def run_pipeline_sync(
         db.commit()
         db.refresh(lead)
 
-        analysis_payload = {
-            "business_name": lead.business_name,
-            "category": lead.category,
-            "city": lead.city,
-            "rating": lead.rating,
-            "reviews_count": lead.reviews_count,
-            "website": lead.website,
-            "phone": lead.phone,
-            "instagram": lead.instagram,
-            "telegram": lead.telegram,
-            "whatsapp": lead.whatsapp,
-            "source_payload": lead.source_payload,
-        }
-
-        digital_signals = detect_digital_signals(
-            analysis_payload,
-        )
-
-        website_enrichment = enrich_website(
-            lead.website,
-        )
-
-        analysis_payload["digital_signals"] = digital_signals
-        analysis_payload["website_enrichment"] = website_enrichment
-
-        analysis = mock_analyze_lead_payload(
-            analysis_payload,
-        )
-
         outreach = generate_ai_outreach(
             {
-                **analysis_payload,
-                "digital_signals": digital_signals,
-                "website_enrichment": website_enrichment,
+                **intelligence_payload,
+                **analysis,
             }
         )
 
@@ -436,6 +345,12 @@ def run_pipeline_sync(
                 "instagram": lead.instagram,
                 "whatsapp": lead.whatsapp,
                 "lead_score": lead.lead_score,
+                "lead_priority": analysis.get("lead_priority"),
+                "digital_maturity": analysis.get("digital_maturity"),
+                "icp_segment": analysis.get("icp_segment"),
+                "main_pain_point": analysis.get("main_pain_point"),
+                "recommended_offer": analysis.get("recommended_offer"),
+                "outreach_angle": analysis.get("outreach_angle"),
                 "digital_signals": digital_signals,
                 "website_enrichment": website_enrichment,
                 "analysis": analysis,
