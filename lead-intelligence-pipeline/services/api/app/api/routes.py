@@ -156,6 +156,96 @@ def backfill_intelligence(
     }
 
 
+@router.get("/dashboard/stats")
+def dashboard_stats(db: Session = Depends(get_db)):
+    leads = db.query(Lead).all()
+
+    total_leads = len(leads)
+
+    priority_distribution = {
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+        "unknown": 0,
+    }
+
+    digital_maturity_distribution = {
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+        "unknown": 0,
+    }
+
+    icp_segments = {}
+    cities = {}
+    categories = {}
+
+    score_total = 0
+    scored_leads_count = 0
+
+    for lead in leads:
+        priority = lead.lead_priority or "unknown"
+        maturity = lead.digital_maturity or "unknown"
+        segment = lead.icp_segment or "unknown"
+        city = lead.city or "unknown"
+        category = lead.category or "unknown"
+
+        if priority not in priority_distribution:
+            priority_distribution[priority] = 0
+
+        if maturity not in digital_maturity_distribution:
+            digital_maturity_distribution[maturity] = 0
+
+        priority_distribution[priority] += 1
+        digital_maturity_distribution[maturity] += 1
+
+        icp_segments[segment] = icp_segments.get(segment, 0) + 1
+        cities[city] = cities.get(city, 0) + 1
+        categories[category] = categories.get(category, 0) + 1
+
+        if lead.lead_score is not None:
+            score_total += lead.lead_score
+            scored_leads_count += 1
+
+    average_lead_score = None
+    if scored_leads_count:
+        average_lead_score = round(score_total / scored_leads_count, 2)
+
+    top_icp_segments = dict(
+        sorted(
+            icp_segments.items(),
+            key=lambda item: item[1],
+            reverse=True,
+        )[:10]
+    )
+
+    top_cities = dict(
+        sorted(
+            cities.items(),
+            key=lambda item: item[1],
+            reverse=True,
+        )[:10]
+    )
+
+    top_categories = dict(
+        sorted(
+            categories.items(),
+            key=lambda item: item[1],
+            reverse=True,
+        )[:10]
+    )
+
+    return {
+        "total_leads": total_leads,
+        "average_lead_score": average_lead_score,
+        "priority_distribution": priority_distribution,
+        "digital_maturity_distribution": digital_maturity_distribution,
+        "top_icp_segments": top_icp_segments,
+        "top_cities": top_cities,
+        "top_categories": top_categories,
+    }
+
+
 @router.post("/campaigns", response_model=CampaignOut)
 def create_campaign(payload: CampaignCreate, db: Session = Depends(get_db)):
     campaign = Campaign(**payload.model_dump())
