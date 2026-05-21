@@ -39,7 +39,16 @@ class LeadCreate(BaseModel):
 class LeadOut(LeadCreate):
     id: str
     status: str
+
     lead_score: int
+
+    lead_priority: str | None = None
+    digital_maturity: str | None = None
+    icp_segment: str | None = None
+
+    main_pain_point: str | None = None
+    recommended_offer: str | None = None
+    outreach_angle: str | None = None
 
     class Config:
         from_attributes = True
