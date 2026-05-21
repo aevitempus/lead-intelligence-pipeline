@@ -54,6 +54,7 @@ def normalize_category(category: str | None) -> str:
         "clinic": "clinic",
         "gym": "fitness_studio",
         "fitness": "fitness_studio",
+        "fitness studio": "fitness_studio",
         "restaurant": "restaurant",
         "cafe": "cafe",
         "coffee shop": "cafe",
@@ -88,48 +89,57 @@ def calculate_intelligence_score(lead: dict) -> int:
 
     opportunity = digital_signals.get("opportunity")
 
-    score = 30
+    score = 10
 
     if category in HIGH_VALUE_CATEGORIES:
-        score += 15
+        score += 12
 
-    if rating >= 4.5:
-        score += 15
+    if rating >= 4.7:
+        score += 12
+    elif rating >= 4.3:
+        score += 9
     elif rating >= 4.0:
-        score += 10
+        score += 6
 
-    if reviews_count >= 100:
-        score += 15
-    elif reviews_count >= 30:
+    if reviews_count >= 1000:
+        score += 12
+    elif reviews_count >= 300:
         score += 10
+    elif reviews_count >= 100:
+        score += 8
+    elif reviews_count >= 30:
+        score += 5
 
     if has_website:
-        score += 10
+        score += 8
 
     if has_phone:
-        score += 5
+        score += 6
 
     if has_instagram:
         score += 5
 
     if has_whatsapp:
-        score += 10
+        score += 8
 
     if not has_booking_stack:
-        score += 15
+        score += 8
 
     if not has_online_booking:
-        score += 15
+        score += 8
 
     if opportunity in {
         "instagram_first_business",
         "no_website_phone_only",
         "website_without_booking",
     }:
-        score += 10
+        score += 8
 
     if opportunity == "already_digitized":
         score -= 10
+
+    if not has_website and not has_instagram and not has_whatsapp:
+        score -= 8
 
     return max(0, min(score, 100))
 
@@ -138,7 +148,7 @@ def get_lead_priority(score: int) -> str:
     if score >= 80:
         return "high"
 
-    if score >= 60:
+    if score >= 55:
         return "medium"
 
     return "low"
@@ -185,34 +195,55 @@ def classify_icp_segment(lead: dict) -> str:
     category = normalize_category(lead.get("category"))
 
     website = lead.get("website") or ""
+    phone = lead.get("phone") or ""
     whatsapp = lead.get("whatsapp") or ""
+    instagram = lead.get("instagram") or ""
 
     digital_signals = lead.get("digital_signals") or {}
     website_enrichment = lead.get("website_enrichment") or {}
 
     has_booking_stack = get_nested_bool(digital_signals, "has_booking_stack")
     has_online_booking = get_nested_bool(website_enrichment, "has_online_booking")
-
     has_booking = has_booking_stack or has_online_booking
 
     if category in {"beauty_salon", "barbershop", "spa", "nail_salon"}:
+        if not website and phone and not instagram and not whatsapp:
+            return "beauty_phone_only"
+
+        if not website:
+            return "beauty_no_website"
+
         if whatsapp and not has_booking:
             return "beauty_whatsapp_no_booking"
+
         if website and not has_booking:
             return "beauty_website_no_booking"
+
         return "beauty_general"
 
     if category in {"dental_clinic", "clinic"}:
+        if not website and phone:
+            return "clinic_phone_only"
+
         if not has_booking:
             return "clinic_no_online_booking"
+
         return "clinic_general"
 
     if category in {"restaurant", "cafe"}:
+        if not website and phone:
+            return "restaurant_phone_only"
+
         if whatsapp and not has_booking:
             return "restaurant_manual_reservations"
+
         if not has_booking:
             return "restaurant_no_reservation_system"
+
         return "restaurant_general"
+
+    if not website and phone:
+        return "smb_phone_only"
 
     if whatsapp and not has_booking:
         return "smb_whatsapp_no_booking"
@@ -226,20 +257,35 @@ def classify_icp_segment(lead: dict) -> str:
 def get_main_pain_point(lead: dict) -> str:
     segment = classify_icp_segment(lead)
 
+    if segment == "beauty_phone_only":
+        return "customers can only call manually to ask about availability and appointments"
+
+    if segment == "beauty_no_website":
+        return "customers cannot easily find a digital booking page or service overview"
+
     if segment == "beauty_whatsapp_no_booking":
         return "manual WhatsApp booking and missed appointment requests"
 
     if segment == "beauty_website_no_booking":
         return "website visitors cannot book appointments directly"
 
+    if segment == "clinic_phone_only":
+        return "patients need to call manually instead of booking online"
+
     if segment == "clinic_no_online_booking":
         return "patients cannot book appointments online after working hours"
+
+    if segment == "restaurant_phone_only":
+        return "customers need to call manually for reservations or availability"
 
     if segment == "restaurant_manual_reservations":
         return "manual reservation handling through WhatsApp"
 
     if segment == "restaurant_no_reservation_system":
         return "no clear online reservation flow"
+
+    if segment == "smb_phone_only":
+        return "customer inquiries depend mainly on manual phone calls"
 
     if segment == "smb_whatsapp_no_booking":
         return "customer inquiries are handled manually through WhatsApp"
@@ -254,6 +300,8 @@ def get_recommended_offer(lead: dict) -> str:
     segment = classify_icp_segment(lead)
 
     if segment in {
+        "beauty_phone_only",
+        "beauty_no_website",
         "beauty_whatsapp_no_booking",
         "beauty_website_no_booking",
         "beauty_general",
@@ -261,12 +309,14 @@ def get_recommended_offer(lead: dict) -> str:
         return "AI booking assistant for appointments"
 
     if segment in {
+        "clinic_phone_only",
         "clinic_no_online_booking",
         "clinic_general",
     }:
         return "AI receptionist for patient appointment scheduling"
 
     if segment in {
+        "restaurant_phone_only",
         "restaurant_manual_reservations",
         "restaurant_no_reservation_system",
         "restaurant_general",
@@ -274,10 +324,11 @@ def get_recommended_offer(lead: dict) -> str:
         return "AI reservation assistant for restaurants"
 
     if segment in {
+        "smb_phone_only",
         "smb_whatsapp_no_booking",
         "smb_website_no_booking",
     }:
-        return "AI WhatsApp assistant for customer inquiries"
+        return "AI assistant for customer inquiries and follow-up"
 
     return "AI assistant for lead capture and customer follow-up"
 
@@ -285,20 +336,35 @@ def get_recommended_offer(lead: dict) -> str:
 def get_outreach_angle(lead: dict) -> str:
     segment = classify_icp_segment(lead)
 
+    if segment == "beauty_phone_only":
+        return "turn manual appointment calls into an easier booking flow"
+
+    if segment == "beauty_no_website":
+        return "create a simple digital booking flow for new customers"
+
     if segment == "beauty_whatsapp_no_booking":
         return "reduce missed bookings from WhatsApp messages"
 
     if segment == "beauty_website_no_booking":
         return "turn website visitors into confirmed appointments"
 
+    if segment == "clinic_phone_only":
+        return "reduce manual phone scheduling for patient appointments"
+
     if segment == "clinic_no_online_booking":
         return "let patients book appointments even outside business hours"
+
+    if segment == "restaurant_phone_only":
+        return "make reservations easier without relying only on phone calls"
 
     if segment == "restaurant_manual_reservations":
         return "automate table reservations and reduce manual replies"
 
     if segment == "restaurant_no_reservation_system":
         return "make reservations easier for customers"
+
+    if segment == "smb_phone_only":
+        return "capture more customer inquiries without relying only on calls"
 
     if segment == "smb_whatsapp_no_booking":
         return "reply faster to customer inquiries on WhatsApp"
