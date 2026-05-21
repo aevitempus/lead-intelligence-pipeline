@@ -4,6 +4,7 @@ import io
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db, Base, engine
@@ -30,6 +31,28 @@ class PipelineRunRequest(BaseModel):
 def init_db():
     Base.metadata.create_all(bind=engine)
     return {"status": "ok"}
+
+
+@router.post("/admin/migrate-lead-intelligence")
+def migrate_lead_intelligence(db: Session = Depends(get_db)):
+    statements = [
+        "ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_priority VARCHAR(50)",
+        "ALTER TABLE leads ADD COLUMN IF NOT EXISTS digital_maturity VARCHAR(50)",
+        "ALTER TABLE leads ADD COLUMN IF NOT EXISTS icp_segment VARCHAR(100)",
+        "ALTER TABLE leads ADD COLUMN IF NOT EXISTS main_pain_point TEXT",
+        "ALTER TABLE leads ADD COLUMN IF NOT EXISTS recommended_offer TEXT",
+        "ALTER TABLE leads ADD COLUMN IF NOT EXISTS outreach_angle TEXT",
+    ]
+
+    for statement in statements:
+        db.execute(text(statement))
+
+    db.commit()
+
+    return {
+        "status": "ok",
+        "message": "Lead intelligence columns migrated successfully",
+    }
 
 
 @router.post("/campaigns", response_model=CampaignOut)
