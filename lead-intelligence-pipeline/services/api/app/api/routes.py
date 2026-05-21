@@ -63,6 +63,9 @@ def create_lead(payload: LeadCreate, db: Session = Depends(get_db)):
 def list_leads(
     status: str | None = None,
     city: str | None = None,
+    icp_segment: str | None = None,
+    lead_priority: str | None = None,
+    digital_maturity: str | None = None,
     limit: int = 100,
     db: Session = Depends(get_db),
 ):
@@ -74,12 +77,24 @@ def list_leads(
     if city:
         query = query.filter(Lead.city == city)
 
+    if icp_segment:
+        query = query.filter(Lead.icp_segment == icp_segment)
+
+    if lead_priority:
+        query = query.filter(Lead.lead_priority == lead_priority)
+
+    if digital_maturity:
+        query = query.filter(Lead.digital_maturity == digital_maturity)
+
     return query.order_by(Lead.created_at.desc()).limit(limit).all()
 
 
 @router.get("/leads/export")
 def export_leads_csv(
     city: str | None = None,
+    icp_segment: str | None = None,
+    lead_priority: str | None = None,
+    digital_maturity: str | None = None,
     limit: int = 1000,
     db: Session = Depends(get_db),
 ):
@@ -87,6 +102,15 @@ def export_leads_csv(
 
     if city:
         query = query.filter(Lead.city == city)
+
+    if icp_segment:
+        query = query.filter(Lead.icp_segment == icp_segment)
+
+    if lead_priority:
+        query = query.filter(Lead.lead_priority == lead_priority)
+
+    if digital_maturity:
+        query = query.filter(Lead.digital_maturity == digital_maturity)
 
     leads = query.order_by(Lead.created_at.desc()).limit(limit).all()
 
@@ -111,6 +135,12 @@ def export_leads_csv(
             "whatsapp",
             "status",
             "lead_score",
+            "lead_priority",
+            "digital_maturity",
+            "icp_segment",
+            "main_pain_point",
+            "recommended_offer",
+            "outreach_angle",
             "created_at",
         ]
     )
@@ -134,6 +164,12 @@ def export_leads_csv(
                 lead.whatsapp,
                 lead.status,
                 lead.lead_score,
+                lead.lead_priority,
+                lead.digital_maturity,
+                lead.icp_segment,
+                lead.main_pain_point,
+                lead.recommended_offer,
+                lead.outreach_angle,
                 lead.created_at,
             ]
         )
@@ -192,6 +228,14 @@ def analyze_lead(lead_id: str, db: Session = Depends(get_db)):
 
     analysis = enrich_lead_intelligence(intelligence_payload)
 
+    lead.lead_score = analysis.get("lead_score") or analysis.get("score") or lead.lead_score
+    lead.lead_priority = analysis.get("lead_priority")
+    lead.digital_maturity = analysis.get("digital_maturity")
+    lead.icp_segment = analysis.get("icp_segment")
+    lead.main_pain_point = analysis.get("main_pain_point")
+    lead.recommended_offer = analysis.get("recommended_offer")
+    lead.outreach_angle = analysis.get("outreach_angle")
+
     outreach = generate_ai_outreach(
         {
             **intelligence_payload,
@@ -209,8 +253,6 @@ def analyze_lead(lead_id: str, db: Session = Depends(get_db)):
             "outreach": outreach,
         },
     )
-
-    lead.lead_score = analysis.get("lead_score") or analysis.get("score") or lead.lead_score
 
     db.add(row)
     db.commit()
@@ -304,6 +346,12 @@ def run_pipeline_sync(
         lead_payload["lead_score"] = analysis.get("lead_score") or score_lead(
             lead_payload,
         )
+        lead_payload["lead_priority"] = analysis.get("lead_priority")
+        lead_payload["digital_maturity"] = analysis.get("digital_maturity")
+        lead_payload["icp_segment"] = analysis.get("icp_segment")
+        lead_payload["main_pain_point"] = analysis.get("main_pain_point")
+        lead_payload["recommended_offer"] = analysis.get("recommended_offer")
+        lead_payload["outreach_angle"] = analysis.get("outreach_angle")
 
         lead = Lead(**lead_payload)
         db.add(lead)
@@ -345,12 +393,12 @@ def run_pipeline_sync(
                 "instagram": lead.instagram,
                 "whatsapp": lead.whatsapp,
                 "lead_score": lead.lead_score,
-                "lead_priority": analysis.get("lead_priority"),
-                "digital_maturity": analysis.get("digital_maturity"),
-                "icp_segment": analysis.get("icp_segment"),
-                "main_pain_point": analysis.get("main_pain_point"),
-                "recommended_offer": analysis.get("recommended_offer"),
-                "outreach_angle": analysis.get("outreach_angle"),
+                "lead_priority": lead.lead_priority,
+                "digital_maturity": lead.digital_maturity,
+                "icp_segment": lead.icp_segment,
+                "main_pain_point": lead.main_pain_point,
+                "recommended_offer": lead.recommended_offer,
+                "outreach_angle": lead.outreach_angle,
                 "digital_signals": digital_signals,
                 "website_enrichment": website_enrichment,
                 "analysis": analysis,
